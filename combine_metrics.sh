@@ -7,18 +7,17 @@ RUN_DIRECTORY=$3
 
 if [ -z "${METRICS_CSV}" ];then
  echo "error: metrics.csv location not set in parameter 1"
- #exit 0
+ exit 1
 fi
 if [ -z "${PICARD_CSV}" ];then
  echo "error: PICARD_CSV location not set in parameter 2"
- #exit 0
+ exit 1
 fi
 if [ -z "${RUN_DIRECTORY}" ];then
  echo "error: RUN_DIRECTORY location not set in parameter 3"
- #exit 0
+ exit 1
 fi
 
-exit 1
 
 ###############################################################################
 #cat metrics_r37.csv|csvtk headers
