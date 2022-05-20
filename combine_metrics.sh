@@ -46,7 +46,6 @@ csvtk join -f 1 picard_tmp.csv metrics_tmp.csv > combined_metrics.csv
 #conda install illumina-interop
 #
 # This part has to be run on the Novaseq Run output.
-RUN_DIRECTORY=220407_A00389_0037_AH3G23DMXY
 interop_summary ${RUN_DIRECTORY} | head -9 | tail -n +3 | sed -e 's/ //g' \
 > summaryA.csv
 
