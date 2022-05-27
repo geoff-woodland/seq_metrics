@@ -17,7 +17,7 @@ if [ -z "${RUN_NAME}" ];then
  exit 1
 fi
 
-RUN_DIRECTORY=Basespa/Runs/${RUN_NAME}/Files
+RUN_DIRECTORY=/mnt/data/Basemount/Basespa/Runs/${RUN_NAME}/Files
 ###############################################################################
 #cat metrics_r37.csv|csvtk headers
 #cat metrics_headers | awk '{printf("\"%s\",",$0)}'
