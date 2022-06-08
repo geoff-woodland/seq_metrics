@@ -1,51 +1,72 @@
 # Script for summarizing Basespace Dragen output for Novaseq
 
-METRICS_CSV=$1
-PICARD_CSV=$2
-RUN_NAME=$3
+RUN_NAME=$1
 
-if [ -z "${METRICS_CSV}" ];then
- echo "error: metrics.csv location not set in parameter 1"
- exit 1
-fi
-if [ -z "${PICARD_CSV}" ];then
- echo "error: PICARD_CSV location not set in parameter 2"
- exit 1
-fi
 if [ -z "${RUN_NAME}" ];then
- echo "error: RUN_DIRECTORY location not set in parameter 3"
+ echo "error: RUN_DIRECTORY location not set in parameter 1"
  exit 1
 fi
 
-RUN_DIRECTORY=/mnt/data/Basemount/Basespa/Runs/${RUN_NAME}/Files
+BASEMOUNT_DIR=/mnt/data/Basemount/Basespa
+RUN_DIRECTORY=${BASEMOUNT_DIR}/Runs/${RUN_NAME}/Files
+PROJ_DIRECTORY=${BASEMOUNT_DIR}/Projects/${RUN_NAME}/AppResults/
+
+METRICS_CSV="metrics.csv"
+PICARD_CSV="picard.csv"
+
 ###############################################################################
-#cat metrics_r37.csv|csvtk headers
-#cat metrics_headers | awk '{printf("\"%s\",",$0)}'
+# get sample IDs processed.
+# an exception for the first run which was done a little differently
+# on Basespace
+if [ ${RUN_NAME} == "R37_2022-04-22_A_AH" ]
+then
+  PROJ_DIRECTORY=/mnt/data/Novaseq/R37_dragen_enrich_3.9.5/links
+fi
+sampleIDs=( $(ls ${PROJ_DIRECTORY}) )
 
+###############################################################################
+#Gather hsMetrics from each sample file
+sample=${sampleIDs[0]}
+tail -4 ${PROJ_DIRECTORY}/${sample}/Files/"Additional Files"/${sample}.HsMetrics.txt \
+  | head -1 \
+  | awk -F'\t' '{printf("SAMPLE_ID\t%s\n",$0)}' \
+  > picard.tsv
+for sample in ${sampleIDs[@]};
+do
+  tail -3 ${PROJ_DIRECTORY}/${sample}/Files/"Additional Files"/${sample}.HsMetrics.txt \
+  | head -1 \
+  | awk -F'\t' -v sample=${sample} '{printf("%s\t%s\n",sample,$0)}' \
+  | tr '\t' ',' \
+  >> picard.tsv
+done
+cat picard.tsv | tr '\t' ',' \
+  > picard.csv
 
+#Gather Dragen metrics from each sample file
+sample=${sampleIDs[0]}
+tail -n +4 ${PROJ_DIRECTORY}/${sample}/Files/Additional\ Files/${sample}.summary.csv \
+  | csvtk transpose | head -1 > metrics.csv
+for sample in ${sampleIDs[@]};
+do
+  tail -n +4 ${PROJ_DIRECTORY}/${sample}/Files/Additional\ Files/${sample}.summary.csv \
+  | csvtk transpose | tail -1 >> metrics.csv
+done
+
+###############################################################################
+# select desired Dragen metrics.
 cat ${METRICS_CSV} | csvtk cut -f"Sample ID","Percent Q30 bases","Fragment length median","Total PF reads","Percent unique aligned reads","Percent duplicate aligned reads","Mean target coverage depth","Uniformity of coverage (Pct > 0.2*mean)","Estimated Sample Contamination","SNVs","SNV Het/Hom ratio","SNV Ts/Tv ratio","Indels","Indel Het/Hom ratio","Insertions","Insertion Het/Hom ratio","Deletions","Deletion Het/Hom ratio","SV Insertions","SV Deletions","SV Tandem Duplications","SV Breakends" > metrics_tmp.csv
 
 ###############################################################################
-#cat picard_r37.csv|csvtk headers
-#cat picard_headers | awk '{printf("\"%s\",",$0)}'
-cat picard.csv | head -1 | cut -d',' -f1-44 > picard_mod1.csv
-cat picard.csv | tail -n +2 >> picard_mod1.csv
-cat picard_mod1.csv | csvtk mutate -f SAMPLE_ID -p "^(.+).HsMetrics.txt" -n sampleID > picard_mod.csv
-
-#cat ${PICARD_CSV} | csvtk cut -f -"SAMPLE",-"LIBRARY",-"READ_GROUP" | csvtk mutate -f SAMPLE_ID -p "^(.+).HsMetrics.txt" -n sampleID > picard_mod.csv
-
-
-cat picard_mod.csv \
-| csvtk cut -f"sampleID","TOTAL_READS","PCT_USABLE_BASES_ON_TARGET","FOLD_80_BASE_PENALTY","FOLD_ENRICHMENT","ZERO_CVG_TARGETS_PCT","PCT_TARGET_BASES_2X","PCT_TARGET_BASES_10X","PCT_TARGET_BASES_20X","PCT_TARGET_BASES_30X","PCT_TARGET_BASES_100X","AT_DROPOUT","GC_DROPOUT"  \
+# select desired picard metrics
+cat picard.csv \
+| csvtk cut -f"SAMPLE_ID","TOTAL_READS","PCT_USABLE_BASES_ON_TARGET","FOLD_80_BASE_PENALTY","FOLD_ENRICHMENT","ZERO_CVG_TARGETS_PCT","PCT_TARGET_BASES_2X","PCT_TARGET_BASES_10X","PCT_TARGET_BASES_20X","PCT_TARGET_BASES_30X","PCT_TARGET_BASES_100X","AT_DROPOUT","GC_DROPOUT"  \
  > picard_tmp.csv
 
 ###############################################################################
 csvtk join -f 1 picard_tmp.csv metrics_tmp.csv > combined_metrics.csv
 
-#csvtk csv2xlsx R37_metrics.csv -o R37_metrics.xlsx
+
 ###############################################################################
-
-
 #conda install illumina-interop
 #
 # This part has to be run on the Novaseq Run output.
@@ -65,7 +86,24 @@ interop_summary ${RUN_DIRECTORY} | tail -35 | head -32 | sed -e 's/ //g' | grep 
         }' \
 | csvtk cut -f"Read","Lane","ClusterPF","%Occupied","LegacyPhasing/PrephasingRate","Phasingslope/offset","Prephasingslope/offset","Reads","ReadsPF","%>=Q30","Yield","Aligned","Error","IntensityC1" \
 > summaryB.csv
-#| csvtk pretty
+
+# Do index summary.
+interop_index-summary ${RUN_DIRECTORY} | tail -n +2 \
+	| awk '{if(match($1,"^Lane")){printf("%s%s ## ## ## ## ##\n",$1,$2)}
+        else if(match($1,"Total")){printf("Total_Reads PF_Reads %_Read_Identified_(PF) CV Min Max\n")}
+        else if(match($1,"Index")){printf("IndexNumber SampleId Project Index_1_(I7) Index_2_(I5) %_Read_Identified(PF)\n")}
+        else {for(i=1;i<NF;i++){printf("%s ",$i)};printf("%s",$NF);printf("\n")}}' \
+        | tr -s ' ' | tr ' ' ',' \
+> index_summary.csv
+
+###############################################################################
+# get versions and options
+
+# get app version
+APP_VERSION=$(cat ${PROJ_DIRECTORY}/"${sampleIDs[0]}"/Files/appVersion.log)
+
+echo ${APP_VERSION} > versions.csv
+echo "File generation time: $(date)" >> versions.csv
 
 ###############################################################################
 # Combine CSVs into one xlsx file
@@ -82,6 +120,8 @@ pd.read_csv('summaryA.csv').to_excel(writer,'InteropA',freeze_panes=[1,0],index=
 pd.read_csv('summaryB.csv').to_excel(writer,'InteropB',freeze_panes=[1,0],index=False)
 pd.read_csv('metrics.csv').to_excel(writer,'Dragen_Metrics',freeze_panes=[1,0],index=False)
 pd.read_csv('picard.csv').to_excel(writer,'Dragen_Picard',freeze_panes=[1,0],index=False)
+pd.read_csv('index_summary.csv').to_excel(writer,'indexes',index=False)
+pd.read_csv('versions.csv').to_excel(writer,'versions',index=False)
 writer.save()
 EOF
 
